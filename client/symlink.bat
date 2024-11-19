@@ -1,0 +1,1 @@
+mklink /D "C:\Users\Administrator\Documents\Arduino\libraries\esp-ai-pro" "esp-ai"
