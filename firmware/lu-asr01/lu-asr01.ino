@@ -17,6 +17,9 @@ Audio audio;
 
 String ssid =     "shixin-soft-com";
 String password = "123456qq";
+#define BUFFER_SIZE 64  // 缓冲区大小
+char buffer[BUFFER_SIZE];  // 用于存储接收到的数据的数组
+int bufferIndex = 0;  // 当前缓冲区中的位置
 
 void setup() {
     
@@ -34,27 +37,37 @@ void setup() {
     audio.setVolume(21); // default 0...21
     audio.forceMono(true);
 
-
-//  *** web files ***
- audio.connecttohost("https://cdn.kedao.ggss.club/demo.mp3");
+    Serial.println("Connected to WiFi");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
 
 }
 
 void loop()
 {
 
-   unsigned long currentMillis = millis();
+  while (Serial.available() > 0) {
+    char receivedChar = Serial.read();  // 读取一个字符 
 
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
+    if (receivedChar == '\n') {  // 如果接收到换行符，表示消息结束
+      buffer[bufferIndex] = '\0';  // 在缓冲区末尾添加字符串终止符
+      Serial.print("Received: ");  // 打印接收到的消息
+      Serial.println(buffer);
 
-    if (ledState == LOW) {
-      ledState = HIGH;
-    } else {
-      ledState = LOW;
+      // 模拟处理消息完成后的行为，例如点亮LED
+      digitalWrite(LED_ONBOARD, HIGH);
+      //  *** web files ***
+     audio.connecttohost("https://cdn.kedao.ggss.club/demo.mp3");
+
+      delay(500);
+      digitalWrite(LED_ONBOARD, LOW);
+
+      // 清空缓冲区，准备接收下一条消息
+      bufferIndex = 0;
+    } else if (bufferIndex < BUFFER_SIZE - 1) {  // 防止缓冲区溢出
+      buffer[bufferIndex] = receivedChar;
+      bufferIndex++;
     }
-
-    digitalWrite(LED_ONBOARD, ledState);
   }
   audio.loop();
 }
