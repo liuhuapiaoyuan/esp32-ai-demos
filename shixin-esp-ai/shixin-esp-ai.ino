@@ -25,7 +25,7 @@ void setup() {
   strcpy(wake_up_config.wake_up_scheme, "asrpro");  // 唤醒方案
   strcpy(wake_up_config.str, "start");              // 串口和天问asrpro 唤醒时需要配置的字符串，也就是从另一个开发版发送来的字符串
 
-  ESP_AI_volume_config volume_config = {34, 4096, 0.8};
+  ESP_AI_volume_config volume_config = {34, 4096, 1};
 
   esp_ai.begin({ debug, wifi_config, server_config, wake_up_config, volume_config });
 }
