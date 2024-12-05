@@ -1,4 +1,4 @@
-const espAi = require("esp-ai");
+const espAi = require("./index.js");
 
 
 // 详情配置项见： https://espai.fun/server.html
@@ -15,13 +15,25 @@ const config = {
             vad_eos: 2000,
         },
 
-        llm_server: "xun_fei",
-        llm_config: {
-            appid: "1c9babaf",
-            apiSecret: "YjE2MTU3ODIzNTRhNTdmNmQ2ZWIzZmRj",
-            apiKey: "72dd6fea830643a1a4bf3cda8d54c2f7",
-            llm: "v3.5",
+        llm_server: "openai",
+        llm_config: { 
+            apiKey:"sk-nRfYlTKZOk5qul4oFe44F9EbB06d43E89287Ff5e4d2a7586" , 
+            model:"llama-3.1-70b-versatile",
+            baseURL:"https://oneapi.lionsn.com/v1"
         },
+        llm_init_messages:[
+            {
+                "role": "system", 
+                "content": `
+Role:时信软件公司的AI助手
+Name: 小胖墩墩
+Task:
+对话的话题围绕时信软件最新研发的AI数字人作为话题，如果话题偏离了，你应该视图引导客户重新咨询相关话题
+场景：
+现在正在一个对话的场景，每次回复都要简洁明了，不要多余的废话。
+                `
+            }
+        ],
 
          // 调用火山引擎TTS
          tts_server: "volcengine",

@@ -1,0 +1,8 @@
+version: '3'
+services:
+  esp-ai:
+    image: liuhuapiaoyuan/esp-ai
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./main.js:/app/src/main.js
