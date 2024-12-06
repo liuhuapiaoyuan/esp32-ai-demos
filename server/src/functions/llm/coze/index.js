@@ -24,6 +24,7 @@
  */
 
 const OpenAI = require('openai');
+const { CozeAPI, ChatEventType, RoleType, COZE_CN_BASE_URL } = require('@coze/api');
 const log = require("../../../utils/log");
 
 /**
@@ -50,9 +51,9 @@ const log = require("../../../utils/log");
 const device_open_obj = {};
 function LLM_FN({ devLog, device_id, llm_config, text, llmServerErrorCb, llm_init_messages = [], llm_historys = [], cb, llm_params_set, logWSServer, connectServerBeforeCb, connectServerCb }) {
     try {
-        const { apiKey, epId, ...other_config } = llm_config;
-        if (!apiKey) return log.error(`请配给 LLM 配置 apiKey 参数。`)
-        if (!epId) return log.error(`请配给 LLM 配置 epId 参数。`)
+        const { apiToken, botId,baseURL, ...other_config } = llm_config;
+        if (!apiToken) return log.error(`请配给扣子 LLM 配置 apiToken 参数。`)
+        if (!botId) return log.error(`请配给扣子LLM 配置 botId 参数。`)
 
         // 如果关闭后 message 还没有被关闭，需要定义一个标志控制
         let shouldClose = false;
@@ -63,31 +64,50 @@ function LLM_FN({ devLog, device_id, llm_config, text, llmServerErrorCb, llm_ini
             index: 0,
         }
 
-        let openai = device_open_obj[device_id];
+        //let openai = device_open_obj[device_id];
         if (!device_open_obj[device_id]) {
             connectServerBeforeCb();
-            const params = {
-                ...other_config,
-                apiKey: apiKey,
-                baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
-            };  
-            openai = new OpenAI(llm_params_set ? llm_params_set({...params}) : params);
+            // const params = {
+            //     ...other_config,
+            //     apiKey: apiKey,
+            //     baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+            // };  
+            // openai = new OpenAI(llm_params_set ? llm_params_set({...params}) : params);
         }
+
+        const client = new CozeAPI({ baseURL:baseURL ?? COZE_CN_BASE_URL, apiToken });
 
 
         async function main() {
             try {
-                const stream = await openai.chat.completions.create({
-                    messages: [
-                        ...llm_init_messages,
-                        ...llm_historys,
-                        {
-                            "role": "user", "content": text
-                        },
-                    ],
-                    model: epId,
-                    stream: true,
-                });
+                // const stream = await openai.chat.completions.create({
+                //     messages: [
+                //         ...llm_init_messages,
+                //         ...llm_historys,
+                //         {
+                //             "role": "user", "content": text
+                //         },
+                //     ],
+                //     model: epId,
+                //     stream: true,
+                // });
+                const messages = [
+                    ...llm_init_messages,
+                    ...llm_historys,
+                    {
+                        "role": "user", "content": text
+                    },
+                ]
+                const stream = await client.chat.stream({
+                    bot_id: botId,
+                    additional_messages: messages.map(msg => ({
+                      role: msg.role === 'user' ? RoleType.User : RoleType.Assistant,
+                      content: msg.content,
+                      content_type: 'text',
+                    })),
+                  });
+
+
                 connectServerCb(true);
                 logWSServer({
                     close: () => {
@@ -98,7 +118,8 @@ function LLM_FN({ devLog, device_id, llm_config, text, llmServerErrorCb, llm_ini
                 })
                 for await (const part of stream) {
                     if (shouldClose) break;
-                    const chunk_text = part.choices[0]?.delta?.content || '';
+                    if (part.event !== ChatEventType.CONVERSATION_MESSAGE_DELTA) break;
+                    const chunk_text = part.data.content || '';
                     // console.log('LLM 输出 ：', chunk_text);
                     devLog === 2 && log.llm_info('LLM 输出 ：', chunk_text);
                     texts["count_text"] += chunk_text;
@@ -121,7 +142,7 @@ function LLM_FN({ devLog, device_id, llm_config, text, llmServerErrorCb, llm_ini
                 devLog && log.llm_info('LLM connect close!\n')
             } catch (error) {
                 console.log(error);
-                llmServerErrorCb("火山 LLM 报错: " + error)
+                llmServerErrorCb("扣子 LLM 报错: " + error)
                 connectServerCb(false);
             }
 
@@ -131,7 +152,7 @@ function LLM_FN({ devLog, device_id, llm_config, text, llmServerErrorCb, llm_ini
 
     } catch (err) {
         console.log(err);
-        log.error("豆包COZE LLM 插件错误：", err)
+        log.error("扣子 LLM 插件错误：", err)
         connectServerCb(false);
     }
 
