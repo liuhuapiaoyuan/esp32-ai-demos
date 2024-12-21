@@ -194,7 +194,7 @@ function IAT_FN({ device_id, session_id, log, devLog, iat_config, iat_server, ll
                 "format": "audio/L16;rate=16000",
                 "audio": data.toString('base64'),
                 // "encoding": "raw",
-                "encoding": "lame", // mp3   
+                "encoding": "raw", // mp3   
             } 
 
             switch (iat_status) {

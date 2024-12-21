@@ -23,9 +23,12 @@
  * @websit https://espai.fun
  */
 
-const OpenAI = require('openai');
-const { CozeAPI, ChatEventType, RoleType, COZE_CN_BASE_URL } = require('@coze/api');
+const { CozeAPI, ChatEventType, RoleType, COZE_CN_BASE_URL, getJWTToken } = require('@coze/api');
 const log = require("../../../utils/log");
+
+// jwt token缓存
+const COZE_JWTTOKEN = {}
+
 
 /**
  * 大语言模型插件
@@ -51,9 +54,15 @@ const log = require("../../../utils/log");
 const device_open_obj = {};
 function LLM_FN({ devLog, device_id, llm_config, text, llmServerErrorCb, llm_init_messages = [], llm_historys = [], cb, llm_params_set, logWSServer, connectServerBeforeCb, connectServerCb }) {
     try {
-        const { apiToken, botId,baseURL, ...other_config } = llm_config;
+        // keyType=> oauth/apiToken
+        const { apiToken, botId, baseURL:_baseURL, privateKey, keyType, appId, ...other_config } = llm_config;
         if (!apiToken) return log.error(`请配给扣子 LLM 配置 apiToken 参数。`)
         if (!botId) return log.error(`请配给扣子LLM 配置 botId 参数。`)
+        if (keyType == 'oauth' && !appId) return log.error(`授权模式请配给扣子 LLM 配置 appId 参数。`)
+        if (keyType == 'oauth' && !privateKey) return log.error(`授权模式请配给扣子 LLM 配置 privateKey 参数。`)
+
+        const baseURL = _baseURL ?? COZE_CN_BASE_URL;
+
 
         // 如果关闭后 message 还没有被关闭，需要定义一个标志控制
         let shouldClose = false;
@@ -74,23 +83,34 @@ function LLM_FN({ devLog, device_id, llm_config, text, llmServerErrorCb, llm_ini
             // };  
             // openai = new OpenAI(llm_params_set ? llm_params_set({...params}) : params);
         }
+        let token = apiToken;
+        if (keyType === 'oauth') {
+            token = async () => {
+                let jwtToken = COZE_JWTTOKEN[apiToken]
+                if (jwtToken && jwtToken.expires_in * 1000 > Date.now() + 5000) {
+                    return jwtToken.access_token;
+                }
+                jwtToken = await getJWTToken({
+                    baseURL,
+                    appId,
+                    aud: new URL(baseURL).host,
+                    keyid: apiToken,
+                    privateKey,
+                    sessionName: 'test', 
+                });
+                COZE_JWTTOKEN[apiToken] = jwtToken;
+                return jwtToken.access_token;
+            }
+        }
 
-        const client = new CozeAPI({ baseURL:baseURL ?? COZE_CN_BASE_URL, apiToken });
 
+        const client = new CozeAPI({
+            baseURL,
+            token,
+        });
 
         async function main() {
             try {
-                // const stream = await openai.chat.completions.create({
-                //     messages: [
-                //         ...llm_init_messages,
-                //         ...llm_historys,
-                //         {
-                //             "role": "user", "content": text
-                //         },
-                //     ],
-                //     model: epId,
-                //     stream: true,
-                // });
                 const messages = [
                     ...llm_init_messages,
                     ...llm_historys,
@@ -101,31 +121,30 @@ function LLM_FN({ devLog, device_id, llm_config, text, llmServerErrorCb, llm_ini
                 const stream = await client.chat.stream({
                     bot_id: botId,
                     additional_messages: messages.map(msg => ({
-                      role: msg.role === 'user' ? RoleType.User : RoleType.Assistant,
-                      content: msg.content,
-                      content_type: 'text',
+                        role: msg.role === 'user' ? RoleType.User : RoleType.Assistant,
+                        content: msg.content,
+                        content_type: 'text',
                     })),
-                  });
-
-
+                });
                 connectServerCb(true);
                 logWSServer({
                     close: () => {
                         connectServerCb(false);
-                        stream.controller.abort()
                         shouldClose = true;
                     }
                 })
                 for await (const part of stream) {
                     if (shouldClose) break;
-                    if (part.event !== ChatEventType.CONVERSATION_MESSAGE_DELTA) break;
-                    const chunk_text = part.data.content || '';
-                    // console.log('LLM 输出 ：', chunk_text);
-                    devLog === 2 && log.llm_info('LLM 输出 ：', chunk_text);
-                    texts["count_text"] += chunk_text;
-                    cb({ text, texts, chunk_text: chunk_text })
+                    if (part.event == ChatEventType.CONVERSATION_CHAT_COMPLETED) {
+                        break;
+                    }
+                    if (part.event == ChatEventType.CONVERSATION_MESSAGE_DELTA) {
+                        const chunk_text = part.data.content || '';
+                        devLog === 2 && log.llm_info('LLM 输出 ：', chunk_text);
+                        texts["count_text"] += chunk_text;
+                        cb({ text, texts, chunk_text: chunk_text })
+                    }
                 }
-                // process.stdout.write('\n');
 
                 if (shouldClose) return;
                 cb({
