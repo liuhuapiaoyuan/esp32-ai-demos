@@ -1,124 +1,134 @@
 #include <WiFi.h>
 #include <WebSocketsClient.h>
-#include <driver/i2s.h>
+#include <driver/adc.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
+// WiFi 配置
+const char* ssid = "li";       // 替换为你的 WiFi SSID
+const char* password = "12345678@@"; // 替换为你的 WiFi 密码
 
-// 替换为你的Wi-Fi和WebSocket服务器信息
-const char* ssid = "li";
-const char* password = "12345678@@";
-String ai_server = "192.168.31.100";
-int ai_server_port = 8080;
+// WebSocket 服务器配置
+const char* wsServer = "192.168.31.98"; // 替换为 WebSocket 服务器的 IP 地址
+const int wsPort = 8080;                     // WebSocket 服务器端口
+const char* wsPath = "/";                  // WebSocket 服务器路径
+
 WebSocketsClient webSocket;
-bool isWebSocketConnected = false;
-bool uploading = false;
-unsigned long uploadStartTime = 0;
 
-// 定义 I2S 配置
-#define I2S_SAMPLE_RATE 8000  // 采样率
-#define I2S_BUFFER_SIZE 1024   // 缓冲区大小
-#define I2S_PORT I2S_NUM_0     // I2S 端口号
-#define I2S_MIC_PIN 35 // 麦克风输入引脚
+// 采样配置
+#define SAMPLE_RATE 8000  // 目标采样率：8 kHz
+#define SAMPLE_INTERVAL (1000000 / SAMPLE_RATE)  // 采样间隔（微秒）
 
+// 缓冲区配置
+#define BUFFER_SIZE 2000   // 缓冲区大小：8 kHz
 
+volatile bool sampleReady = false;
+uint16_t adcBuffer[BUFFER_SIZE];  // 存储 8 kHz 的采样数据
+int sampleIndex = 0;
 
- 
+// 录制时间配置
+#define RECORD_TIME 10  // 录制时间（秒）
+unsigned long startTime = 0;
+
+// 定时器线程
+void timerThread(void* arg) {
+  while (1) {
+    if (webSocket.isConnected()) {  // 只有在 WebSocket 连接时才采集数据
+      sampleReady = true;
+    }
+    vTaskDelay(SAMPLE_INTERVAL / 1000 / portTICK_PERIOD_MS);  // 延迟采样间隔
+  }
+}
+
+// WebSocket 事件处理
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.println("WebSocket connected to server");
+      break;
+    case WStype_DISCONNECTED:
+      Serial.println("WebSocket disconnected from server");
+      break;
+    case WStype_TEXT:
+      Serial.printf("Received text: %s\n", payload);
+      break;
+    case WStype_BIN:
+      Serial.printf("Received binary data, length: %u\n", length);
+      break;
+    default:
+      break;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
 
-  // 连接到Wi-Fi
+  // 配置 WiFi
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     Serial.println("Connecting to WiFi...");
   }
   Serial.println("Connected to WiFi");
+  Serial.println(WiFi.localIP());
 
+  // 配置 WebSocket 客户端
+  webSocket.begin(wsServer, wsPort, wsPath);
+  webSocket.onEvent(onWebSocketEvent);
 
-// 连接到WebSocket服务器
-  webSocket.begin(ai_server.c_str(), ai_server_port, "/");
-  webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(2000);
+  // 配置 ADC
+  adc1_config_width(ADC_WIDTH_BIT_12);  // 设置 ADC 分辨率为 12 位
+  adc1_config_channel_atten(ADC1_CHANNEL_7, ADC_ATTEN_DB_12);  // 替换为 ADC_ATTEN_DB_12
 
+  // 创建定时器线程
+  xTaskCreatePinnedToCore(
+    timerThread,    // 任务函数
+    "TimerThread",  // 任务名称
+    4096,           // 堆栈大小
+    NULL,           // 任务参数
+    1,              // 任务优先级
+    NULL,           // 任务句柄
+    1);             // 核心 ID
 
-// 配置 I2S 引脚
-  i2s_config_t i2s_config = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = I2S_SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_I2S,
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 4,
-    .dma_buf_len = I2S_BUFFER_SIZE,
-    .use_apll = false,
-    .tx_desc_auto_clear = false,
-    .fixed_mclk = 0
-  };
-
-  // 配置 I2S 引脚
-  i2s_pin_config_t pin_config = {
-    .bck_io_num = I2S_PIN_NO_CHANGE,
-    .ws_io_num = I2S_PIN_NO_CHANGE,
-    .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num = I2S_MIC_PIN
-  };
-
-  // 安装 I2S 驱动
-  i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
-  i2s_set_pin(I2S_PORT, &pin_config);
-
-  // 启动 I2S
-  i2s_start(I2S_PORT);
-
+  // 记录开始时间
+  startTime = millis();
 }
 
 void loop() {
+  // 处理 WebSocket 事件
   webSocket.loop();
- 
-  if (isWebSocketConnected && uploading) {
-      int32_t samples[I2S_BUFFER_SIZE];
-      size_t bytes_read;
 
-      // 从 I2S 读取数据
-      i2s_read(I2S_PORT, samples, sizeof(samples), &bytes_read, portMAX_DELAY);
-    // 发送音频数据
-      webSocket.sendBIN((uint8_t*)samples, bytes_read);
-    // 检查是否已经上传了20秒
-    if (millis() - uploadStartTime >= 10000) {
-      webSocket.sendTXT("-1"); // 发送文本“-1”
-      uploading = false;
+  if (sampleReady && webSocket.isConnected()) {  // 只有在 WebSocket 连接时才处理数据
+    sampleReady = false;
+
+    // 读取 ADC 值
+    adcBuffer[sampleIndex] = adc1_get_raw(ADC1_CHANNEL_7);  // 使用 adc1_get_raw 读取 ADC 值
+    sampleIndex++;
+
+    // 如果缓冲区满 8 kHz 的数据，发送数据到 WebSocket 服务器
+    if (sampleIndex >= BUFFER_SIZE) {
+      // 将 16 位数据转换为 8 位数据（PCM 格式）
+      uint8_t pcmBuffer[BUFFER_SIZE * 2];
+      for (int i = 0; i < BUFFER_SIZE; i++) {
+        pcmBuffer[i * 2] = adcBuffer[i] & 0xFF;       // 低字节
+        pcmBuffer[i * 2 + 1] = (adcBuffer[i] >> 8) & 0xFF; // 高字节
+      }
+
+      // 通过 WebSocket 发送二进制数据
+      webSocket.sendBIN(pcmBuffer, BUFFER_SIZE * 2);
+
+      sampleIndex = 0;
+
+      // 检查录制时间是否超过 10 秒
+      if (millis() - startTime >= RECORD_TIME * 1000) {
+        // 发送 -1 表示录制结束
+        String endSignal = "-1";  // 将 -1 转换为 String 类型
+        webSocket.sendTXT(endSignal);  // 传递 String 变量
+        Serial.println("Recording finished, sent -1 to server.");
+
+        // 重置录制时间
+        startTime = millis();
+      }
     }
   }
-} 
-
-// WebSocket事件处理
-void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
-    case WStype_CONNECTED:
-      Serial.printf("Connected to WebSocket\n");
-      isWebSocketConnected = true;
-      webSocket.sendTXT("1"); // 发送文本“1”
-      uploadStartTime = millis();
-      uploading = true;
-      break;
-    case WStype_DISCONNECTED:
-      Serial.printf("Disconnected from WebSocket\n");
-      isWebSocketConnected = false;
-      uploading = false;
-      break;
-    case WStype_ERROR:
-      Serial.printf("WebSocket error\n");
-      isWebSocketConnected = false;
-      uploading = false;
-      break;
-    case WStype_TEXT:
-      // 处理收到的文本消息
-      break;
-    case WStype_BIN:
-      // 处理收到的二进制消息
-      break;
-  }
 }
-
- 
-

@@ -18,11 +18,14 @@ void setup() {
   ESP_AI_wifi_config wifi_config = { "li", "12345678@@", "SHIXIN-ESP-AI" };
   // [可 填] 服务配置： { 服务协议, 服务IP， 服务端口, "[可选] 请求参数" }
   ESP_AI_server_config server_config = {
-    "http","192.168.31.100",8088 ,""
+   // "http","192.168.31.98",8088 ,""
+    "http","robot.lionsn.com",80 ,"name=abc"
   };
+//  ESP_AI_wake_up_config wake_up_config = { "asrpro" };  // 如果按钮按下是低电平，那使用 pin_low 即可 
+
   // [必  填] 唤醒方案： { 方案, 语音唤醒用的阈值(本方案忽略即可), 引脚唤醒方案(本方案忽略), 发送的字符串 } 
   ESP_AI_wake_up_config wake_up_config = {"asrpro"};
-  strcpy(wake_up_config.wake_up_scheme, "asrpro");  // 唤醒方案
+ strcpy(wake_up_config.wake_up_scheme, "asrpro");  // 唤醒方案
   strcpy(wake_up_config.str, "start");              // 串口和天问asrpro 唤醒时需要配置的字符串，也就是从另一个开发版发送来的字符串
 
   ESP_AI_volume_config volume_config = {34, 4096, 1};
@@ -31,5 +34,6 @@ void setup() {
 }
 
 void loop() {
+ 
   esp_ai.loop();
 }

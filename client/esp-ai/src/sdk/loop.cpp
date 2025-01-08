@@ -125,6 +125,8 @@ void ESP_AI::loop()
         int reading = digitalRead(wake_up_config.pin);
         long curTime = millis();
         int target_val = wake_up_scheme == "pin_high" ? 1 : 0;
+        DEBUG_PRINTLN(debug, (String(target_val)));
+
         if (reading == target_val)
         {
             if ((curTime - lastDebounceTime) > debounceDelay)
